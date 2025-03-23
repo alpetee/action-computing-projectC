@@ -32,8 +32,8 @@ All of the data I'm using for this project is sourced from FRED, Federal Reserve
   - This dataset has the median cost of chicken in the US over the last 50 years. I chose this dataset to show 
     how the costs of household goods in my selected region have changed over time.
 
-- [Average Cost of Gas](https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=pet&s=emm_epm0_pte_nus_dpg&f=a)
-  - This dataset has average cost of gas in the US over the last 50 years. Because most individuals commute in some way, I chose this dataset to show
+- [Average Cost of Gas](https://fred.stlouisfed.org/series/GASREGCOVW)
+  - This dataset has average cost of gas in the US over the last 30 years. Because most individuals commute in some way, I chose this dataset to show
     how another factor impacts the finances of the typical household, and how it has changed over time.
 
 
