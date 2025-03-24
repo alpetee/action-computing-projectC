@@ -11,9 +11,9 @@ users the opportunity to explore cost of living in the US over the last 50 years
 ***
 
 ### Example Discoveries from this Exploratory Dashboard
-- Example 1
-- Example 2
-- Example 3
+- The user realizes that they have more money at their disposal then they may have thought. 
+- The user realizes that they have less money at their disposal then they may have thought. 
+- The user realizes that although things feel more expensive, the income is increasing as well. 
 
 ### The Region 
 As I read through this assignments [pre-reading article](https://livingwage.mit.edu/pages/methodology) on living wage and how it is estimated, 

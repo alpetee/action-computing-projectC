@@ -5,10 +5,6 @@ import plotly.graph_objects as go
 import pandas as pd
 import os
 import numpy as np
-# TODO: issue: line graph only shows when i press the "raw" tab. i want it to display all the time, like the bar chart.
-# TODO: start ammount is not displayed from the year-- opps
-# TODO: somewhere in here there is a divide by 0 error...
-# TODO: currently, the percentages on the bar chart are the selected number out of the total income. it needs to be selected number out of the income-housing/12
 
 app = Dash(
     __name__,
@@ -55,9 +51,6 @@ Helper functions to calculate saving results and stuff
 def get_monthly(selected_year):
     value = income_df.loc[income_df["year"] == selected_year, "Income"]
     if not value.empty:
-        print("yearly income", value.iloc[0])
-
-        print("STARTING AMMOUNT",value.iloc[0] / 12 )
         return (income_df.iloc[0] - house_df.iloc[0]) / 12  # Subtract housing cost first
 
     else:
@@ -67,7 +60,6 @@ def get_monthly(selected_year):
 def cost_per_mile(selected_year):
     cost = gas_df.loc[gas_df["year"] == selected_year, "gas"]
     if not cost.empty:
-        print("cost per mile", cost)
         return cost.iloc[0] / 25  # Average MPG is 25
 
     else:
@@ -94,10 +86,12 @@ datasource_text = dcc.Markdown(
 
 income_allocation_text = dcc.Markdown(
     """
-> **Income allocation** is a way to explore, given the average income, what someone can afford.   Play with the app and see for yourself!
+> **Disposable income allocation** is a way to explore, given the average income, what someone can afford.
 
-> Change the allocation of chicken and gas on the sliders and see how your income supports you over time in the graph.
-  Try entering different time periods and dollar amounts too.
+Play with the app and see for yourself!
+
+> Change the allocation of chicken and gas on the sliders and see how your income supports you in the graph.
+  Try entering different time periods too.
 """
 )
 
@@ -154,13 +148,13 @@ Figures
 def make_bar(slider_input, title):
     sorted_indices = sorted(range(len(slider_input)), key=lambda k: slider_input[k], reverse=True)
     sorted_slider_input = [slider_input[i] for i in sorted_indices]
-    sorted_labels = ["Housing", "Gas", "Food", "Savings"]
+    sorted_labels = ["Gas", "Food", "Savings"]  # Removed Housing
     sorted_labels = [sorted_labels[i] for i in sorted_indices]
 
-    total = 100  # Total is always 100% of income
+    total = 100  # Total is always 100% of disposable income
     percentages = [(value / total) * 100 for value in sorted_slider_input]
 
-    shades_of_blue = ["#1f77b4", "#4d88ff", "#a6c6ff", "#8ecae6"]
+    colors = ["#008000", "#FFFF00", "#FFA500"]  # Only for Gas, Food, and Savings
 
     fig = go.Figure()
 
@@ -170,7 +164,7 @@ def make_bar(slider_input, title):
             x=[sorted_slider_input[i]],
             orientation="h",
             name=label,
-            marker={"color": shades_of_blue[i]},
+            marker={"color": colors[i]},
             textfont=dict(color="white"),
             text=[f'    {percentages[i]:.1f}%'],
             textposition="inside",
@@ -186,8 +180,8 @@ def make_bar(slider_input, title):
     )
     return fig
 
+
 # Add graph showing normalized log of USD for income, gas, chicken, and house costs
-# TODO: i want this to show ALL of the time, not just when the "raw" is selected
 def make_time_series_graph(df):
     fig = go.Figure()
 
@@ -287,16 +281,8 @@ year = dbc.InputGroup(
 )
 
 
-end_amount = dbc.InputGroup(
-    [
-        dbc.InputGroupText("Ending Amount"),
-        dbc.Input(id="ending_amount", disabled=True, className="text-black"),
-    ],
-    className="mb-3",
-)
-
 input_groups = html.Div(
-    [start_amount, year, end_amount],
+    [start_amount, year],
     className="mt-4 p-4",
 )
 
@@ -388,10 +374,10 @@ Callbacks
 def update_bar(chicken_meals, gas_miles, year):
     # Get yearly income and convert to monthly
     income_value = income_df.loc[income_df["year"] == year, "Income"]
-    if not income_value.empty:
+    if not income_value.empty and income_value.iloc[0] > 0:
         monthly_income = income_value.iloc[0] / 12
     else:
-        monthly_income = 0
+        return make_bar([0, 0], "Monthly Budget Breakdown")  # Return empty chart if no income data
 
     # Get monthly housing cost
     house_value = house_df.loc[house_df["year"] == year, "house"]
@@ -400,25 +386,26 @@ def update_bar(chicken_meals, gas_miles, year):
     else:
         monthly_housing = 0
 
-    # Calculate gas and chicken costs
+    # **Define disposable income**
+    disposable_income = monthly_income - monthly_housing
+    if disposable_income <= 0:
+        return make_bar([0, 0], "No Disposable Income")  # Prevent division errors
+
+    # Calculate gas and food costs
     gas_cost = gas_miles * cost_per_mile(year)
     food_cost = chicken_meals * cost_per_meal(year)
 
-    # Total expenses including housing
-    total_expense = gas_cost + food_cost + monthly_housing
+    # Total expenses (excluding housing)
+    total_expense = gas_cost + food_cost
 
-    # Calculate percentages based on total income
-    if income_value.empty or income_value.iloc[0] == 0:
-        housing_percent = gas_percent = food_percent = savings_percent = 0
-    else:
-        housing_percent = (monthly_housing / monthly_income) * 100
-        gas_percent = (gas_cost / monthly_income) * 100
-        food_percent = (food_cost / monthly_income) * 100
-        savings_percent = max(0, 100 - (housing_percent + gas_percent + food_percent))
+    # Calculate percentages based on disposable income
+    gas_percent = (gas_cost / disposable_income) * 100
+    food_percent = (food_cost / disposable_income) * 100
+    savings_percent = max(0, 100 - (gas_percent + food_percent))
 
     # Values for stacked bar
-    slider_input = [housing_percent, gas_percent, food_percent, savings_percent]
-    sorted_labels = ["Housing", "Gas", "Food", "Savings"]
+    slider_input = [gas_percent, food_percent, savings_percent]
+    sorted_labels = ["Gas", "Food", "Savings"]
 
     figure = make_bar(slider_input, "Monthly Budget Breakdown")
     return figure
