@@ -21,7 +21,6 @@ house_df = pd.read_csv("data/house.csv")
 chicken_df = pd.read_csv("data/chicken.csv")
 gas_df = pd.read_csv("data/gas.csv")
 dfs = [income_df, house_df, chicken_df, gas_df]
-print(income_df.columns)
 
 # Convert 'observation_date' to 'year' and drop 'observation_date' while keeping 'year'
 for df in dfs:
@@ -34,7 +33,6 @@ for df in dfs:
 df = income_df.merge(chicken_df, on="year", how="inner") \
              .merge(house_df, on="year", how="inner") \
              .merge(gas_df, on="year", how="inner")
-print(df.head())
 
 # Convert to Dash DataTable format
 data_records = df.to_dict("records")
@@ -54,21 +52,20 @@ COLORS = {
 Helper functions to calculate saving results and stuff
 """
 
-def get_starting_amount(selected_year):
-
+def get_monthly(selected_year):
     value = income_df.loc[income_df["year"] == selected_year, "Income"]
     if not value.empty:
         print("yearly income", value.iloc[0])
 
         print("STARTING AMMOUNT",value.iloc[0] / 12 )
-        return value.iloc[0] / 12
+        return (income_df.iloc[0] - house_df.iloc[0]) / 12  # Subtract housing cost first
 
     else:
         return 0
 
 # Implement cost_per_mile function
 def cost_per_mile(selected_year):
-    cost = gas_df.loc[gas_df["year"] == selected_year, "GASREGCOVW"]
+    cost = gas_df.loc[gas_df["year"] == selected_year, "gas"]
     if not cost.empty:
         print("cost per mile", cost)
         return cost.iloc[0] / 25  # Average MPG is 25
@@ -157,13 +154,13 @@ Figures
 def make_bar(slider_input, title):
     sorted_indices = sorted(range(len(slider_input)), key=lambda k: slider_input[k], reverse=True)
     sorted_slider_input = [slider_input[i] for i in sorted_indices]
-    sorted_labels = ["Chicken (lbs)", "Gas (gallons)", "Savings"]
+    sorted_labels = ["Housing", "Gas", "Food", "Savings"]
     sorted_labels = [sorted_labels[i] for i in sorted_indices]
 
-    total = sum(sorted_slider_input) # TODO: this should not be the sorted slider input. it should be the yearly income
+    total = 100  # Total is always 100% of income
     percentages = [(value / total) * 100 for value in sorted_slider_input]
 
-    shades_of_blue = ["#1f77b4", "#4d88ff", "#a6c6ff"]
+    shades_of_blue = ["#1f77b4", "#4d88ff", "#a6c6ff", "#8ecae6"]
 
     fig = go.Figure()
 
@@ -193,19 +190,25 @@ def make_bar(slider_input, title):
 # TODO: i want this to show ALL of the time, not just when the "raw" is selected
 def make_time_series_graph(df):
     fig = go.Figure()
+
     for col in ["Income", "house", "chicken", "gas"]:
+        log_values = np.log(df[col])  # Apply log
+        scaled_values = (log_values - log_values.min()) / (log_values.max() - log_values.min())  # Normalize
+
         fig.add_trace(go.Scatter(
             x=df["year"],
-            y=np.log(df[col]),  # Normalize using log scale
+            y=scaled_values,  # Use normalized values
             mode="lines",
             name=col,
         ))
+
     fig.update_layout(
         title="Normalized Log of USD Over Time",
         xaxis_title="Year",
-        yaxis_title="Log of USD",
+        yaxis_title="Normalized Log of USD (0 to 1)",
         legend_title="Category",
     )
+
     return fig
 
 """
@@ -246,17 +249,27 @@ slider_card = dbc.Card(
     className="mt-4",
 )
 
+# Dropdown for selecting year
+year_dropdown = dcc.Dropdown(
+    id="year_selector",
+    options=[{"label": str(year), "value": year} for year in sorted(df["year"].unique())],
+    value=df["year"].max(),  # Default to max year
+    clearable=False,
+    style={"width": "200px"},
+)
+
+# Input group to display start amount
 start_amount = dbc.InputGroup(
     [
         dbc.InputGroupText("Start Amount $"),
         html.Div(
             id="starting_amount",
-            children=f"${get_starting_amount(MAX_YR):,.2f}", # TODO: this should be the start ammount for the selected year, not the max year
             style={"padding": "0.375rem 0.75rem"}
         ),
     ],
     className="mb-3",
 )
+
 
 year = dbc.InputGroup(
     [
@@ -372,43 +385,64 @@ Callbacks
     Input("gas", "value"),
     Input("year", "value"),
 )
-def update_bar(chicken_lbs, gas_gallons, year):
-# TODO: this should subtract the housing from the income. then that is the income for the month.
-    monthly_income = get_starting_amount(year) #
-    print("monthly income in updae bar:", monthly_income)
+def update_bar(chicken_meals, gas_miles, year):
+    # Get yearly income and convert to monthly
+    income_value = income_df.loc[income_df["year"] == year, "Income"]
+    if not income_value.empty:
+        monthly_income = income_value.iloc[0] / 12
+    else:
+        monthly_income = 0
 
-    # Prices per unit
-    price_per_lb_chicken = chicken_df.loc[chicken_df["year"] == year, "chicken"].iloc[0]
-    print("price per lb cjhicken ",price_per_lb_chicken )
-    price_per_gallon_gas = gas_df.loc[gas_df["year"] == year, "gas"].iloc[0]
-    print("price_per_gallon_gas ", price_per_gallon_gas)
+    # Get monthly housing cost
+    house_value = house_df.loc[house_df["year"] == year, "house"]
+    if not house_value.empty:
+        monthly_housing = (((house_value.iloc[0]) * 0.85) / 30) / 12
+    else:
+        monthly_housing = 0
 
-    # Calculate total expenses
-    total_expense = (chicken_lbs * price_per_lb_chicken) + (gas_gallons * price_per_gallon_gas)
-    print("total expense: ",total_expense)
+    # Calculate gas and chicken costs
+    gas_cost = gas_miles * cost_per_mile(year)
+    food_cost = chicken_meals * cost_per_meal(year)
 
-    # Calculate remaining savings
-    savings = max(0, monthly_income - total_expense)
+    # Total expenses including housing
+    total_expense = gas_cost + food_cost + monthly_housing
 
-    # Convert to percentage of total income
-    expense_percent = min(100, (total_expense / monthly_income) * 100)
-    savings_percent = max(0, 100 - expense_percent)
+    # Calculate percentages based on total income
+    if income_value.empty or income_value.iloc[0] == 0:
+        housing_percent = gas_percent = food_percent = savings_percent = 0
+    else:
+        housing_percent = (monthly_housing / monthly_income) * 100
+        gas_percent = (gas_cost / monthly_income) * 100
+        food_percent = (food_cost / monthly_income) * 100
+        savings_percent = max(0, 100 - (housing_percent + gas_percent + food_percent))
 
-    slider_input = [expense_percent, savings_percent]
-    sorted_labels = ["Expenses", "Savings"]
+    # Values for stacked bar
+    slider_input = [housing_percent, gas_percent, food_percent, savings_percent]
+    sorted_labels = ["Housing", "Gas", "Food", "Savings"]
 
     figure = make_bar(slider_input, "Monthly Budget Breakdown")
     return figure
 
-# Add callback for the time series graph
 @app.callback(
     Output("time_series_graph", "figure"),
-    Input("tabs", "active_tab"),
+    Input("year", "value"),
 )
-def update_time_series_graph(active_tab):
-    if active_tab == "tab-3":
-        return make_time_series_graph(df)
-    return go.Figure()
+def update_time_series_graph(year):
+    return make_time_series_graph(df)
+
+@app.callback(
+    Output("starting_amount", "children"),
+    Input("year", "value")
+)
+
+def update_starting_amount(year):
+    income_value = income_df.loc[income_df["year"] == year, "Income"]
+    if not income_value.empty:
+        starting_amt = (income_value.iloc[0] / 12)
+    else:
+        starting_amt = 0  # Default value if the year is missing
+    return starting_amt
+
 
 if __name__ == "__main__":
     app.run(debug=True)
