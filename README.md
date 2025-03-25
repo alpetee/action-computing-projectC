@@ -9,6 +9,12 @@
 This project is part of my Community Action Computing class and focuses on creating an exploratory dashboard that gives 
 users the opportunity to explore cost of living in the US over the last 50 years. 
 ***
+### ExTRA CREDIT CHANGES
+Based on the feedback I received, I changed my: 
+- line graph to show more smooth lines. the issue was that the x-axis was plotting multiple months of data on single year 
+x-values. To fix it, I changed the data I was using from "year" to "observation date"
+- bar graph to always show accurate data. To fix it, I filtered my data and only kept values that had income data.
+- slider values for gas increased to represent the average miles driven in a month.
 
 ### Example Discoveries from this Exploratory Dashboard
 - The user realizes that they have more money at their disposal then they may have thought. 

@@ -18,23 +18,33 @@ chicken_df = pd.read_csv("data/chicken.csv")
 gas_df = pd.read_csv("data/gas.csv")
 dfs = [income_df, house_df, chicken_df, gas_df]
 
-# Convert 'observation_date' to 'year' and drop 'observation_date' while keeping 'year'
-for df in dfs:
-    if "observation_date" in df.columns:
-        df["observation_date"] = pd.to_datetime(df["observation_date"])
-        df["year"] = df["observation_date"].dt.year
-        df.drop(columns=["observation_date"], inplace=True)  # Drop to prevent merge conflicts
+for df in [house_df, income_df, gas_df, chicken_df]:
+    df["observation_date"] = pd.to_datetime(df["observation_date"])
 
-# Merge all datasets on 'year', keeping 'year' in the final DataFrame
-df = income_df.merge(chicken_df, on="year", how="inner") \
-             .merge(house_df, on="year", how="inner") \
-             .merge(gas_df, on="year", how="inner")
+# Merge all datasets on "observation_date" using an outer join (to keep all raw timestamps)
+df = house_df.merge(income_df, on="observation_date", how="outer") \
+             .merge(gas_df, on="observation_date", how="outer") \
+             .merge(chicken_df, on="observation_date", how="outer")
 
+# Extract 'year' from 'observation_date' after merging
+df["year"] = df["observation_date"].dt.year
+
+# Keep only relevant columns
+df = df[["observation_date", "year", "house", "gas", "income", "chicken"]]
+
+# Sort by date to maintain chronological order
+df = df.sort_values(by="observation_date").reset_index(drop=True)
+
+# Keep only relevant columns (observation_date, year, and data columns)
+
+# Display first few rows to verify
+print("pringing head", df.head())
 # Convert to Dash DataTable format
 data_records = df.to_dict("records")
+df = df[df["income"].notna()]
 
-MAX_YR = gas_df.year.max()
-MIN_YR = gas_df.year.min()
+MAX_YR = df.year.max()
+MIN_YR = df.year.min()
 
 COLORS = {
     "income": "#3cb521",
@@ -48,30 +58,43 @@ COLORS = {
 Helper functions to calculate saving results and stuff
 """
 
+
 def get_monthly(selected_year):
-    value = income_df.loc[income_df["year"] == selected_year, "Income"]
-    if not value.empty:
-        return (income_df.iloc[0] - house_df.iloc[0]) / 12  # Subtract housing cost first
+    # Get the income and house cost for the selected year
+    income_value = df.loc[df["year"] == selected_year, "income"]
+    house_value = df.loc[df["year"] == selected_year, "house"]
+
+    # Ensure both values exist before performing calculations
+    if not income_value.empty and not house_value.empty:
+        return (income_value.iloc[0] - house_value.iloc[0]) / 12  # Compute monthly amount
 
     else:
-        return 0
+        return 0  # Return 0 if data is missing for the selected year
 
-# Implement cost_per_mile function
+
 def cost_per_mile(selected_year):
-    cost = gas_df.loc[gas_df["year"] == selected_year, "gas"]
+    # Get the gas cost for the selected year from df
+    cost = df.loc[df["year"] == selected_year, "gas"]
+
+    # Ensure the value exists before performing calculations
     if not cost.empty:
-        return cost.iloc[0] / 25  # Average MPG is 25
+        return cost.iloc[0] / 25  # Assuming an average MPG of 25
 
     else:
-        return 0
+        return 0  # Return 0 if data is missing for the selected year
 
-# Implement cost_per_meal function
+
 def cost_per_meal(selected_year):
-    cost = chicken_df.loc[chicken_df["year"] == selected_year, "chicken"]
+    # Get the chicken cost for the selected year from df
+    cost = df.loc[df["year"] == selected_year, "chicken"]
+
+    # Ensure the value exists before performing calculations
     if not cost.empty:
-        return cost.iloc[0] / 3  # Average meal is 1/3 of the total cost
+        return cost.iloc[0] / 3  # Assuming an average meal uses 1/3 of the total cost
+
     else:
-        return 0
+        return 0  # Return 0 if data is missing for the selected year
+
 
 """
 ==========================================================================
@@ -145,6 +168,40 @@ income_table = dash_table.DataTable(
 Figures
 """
 
+# def make_bar(slider_input, title):
+#     sorted_indices = sorted(range(len(slider_input)), key=lambda k: slider_input[k], reverse=True)
+#     sorted_slider_input = [slider_input[i] for i in sorted_indices]
+#     sorted_labels = ["Gas", "Food", "Savings"]  # Removed Housing
+#     sorted_labels = [sorted_labels[i] for i in sorted_indices]
+#
+#     total = 100  # Total is always 100% of disposable income
+#     percentages = [(value / total) * 100 for value in sorted_slider_input]
+#
+#     colors = ["#008000", "#FFFF00", "#FFA500"]  # Only for Gas, Food, and Savings
+#
+#     fig = go.Figure()
+#
+#     for i, label in enumerate(sorted_labels):
+#         fig.add_trace(go.Bar(
+#             y=["Budget Allocation"],
+#             x=[sorted_slider_input[i]],
+#             orientation="h",
+#             name=label,
+#             marker={"color": colors[i]},
+#             textfont=dict(color="white"),
+#             text=[f'    {percentages[i]:.1f}%'],
+#             textposition="inside",
+#             hoverinfo="none"
+#         ))
+#
+#     fig.update_layout(
+#         title_text=title,
+#         title_x=0.5,
+#         barmode="stack",
+#         margin=dict(b=25, t=75, l=35, r=25),
+#         height=325,
+#     )
+#     return fig
 def make_bar(slider_input, title):
     sorted_indices = sorted(range(len(slider_input)), key=lambda k: slider_input[k], reverse=True)
     sorted_slider_input = [slider_input[i] for i in sorted_indices]
@@ -181,29 +238,41 @@ def make_bar(slider_input, title):
     return fig
 
 
-# Add graph showing normalized log of USD for income, gas, chicken, and house costs
-def make_time_series_graph(df):
+
+def make_time_series_graph():
     fig = go.Figure()
 
-    for col in ["Income", "house", "chicken", "gas"]:
-        log_values = np.log(df[col])  # Apply log
+    # Mapping dataframe names to their corresponding column names
+    data_sources = {
+        "income": income_df,
+        "house": house_df,
+        "chicken": chicken_df,
+        "gas": gas_df
+    }
+
+    for name, df in data_sources.items():
+        print(df.head)
+        df["observation_date"] = pd.to_datetime(df["observation_date"])  # Ensure datetime format
+
+        log_values = np.log(df[name])  # Apply log
         scaled_values = (log_values - log_values.min()) / (log_values.max() - log_values.min())  # Normalize
 
         fig.add_trace(go.Scatter(
-            x=df["year"],
+            x=df["observation_date"],  # Use observation_date
             y=scaled_values,  # Use normalized values
             mode="lines",
-            name=col,
+            name=name,
         ))
 
     fig.update_layout(
         title="Normalized Log of USD Over Time",
-        xaxis_title="Year",
+        xaxis_title="Observation Date",
         yaxis_title="Normalized Log of USD (0 to 1)",
         legend_title="Category",
     )
 
     return fig
+
 
 """
 ==========================================================================
@@ -217,10 +286,10 @@ slider_card = dbc.Card(
         html.Div("(calculated on the average car having 25mpg gas mileage)", className="card-title"),
         dcc.Slider(
             id="gas",
-            marks={i: f"{i}" for i in range(0, 101, 10)},
+            marks={i: f"{i}" for i in range(0, 1501, 100)},  # Adjust marks for range 0 to 1500 with steps of 100
             min=0,
-            max=100,
-            step=5,
+            max=1500,
+            step=100,
             value=10,
             included=False,
         ),
@@ -365,6 +434,7 @@ app.layout = dbc.Container(
 Callbacks
 """
 
+
 @app.callback(
     Output("allocation_bar_chart", "figure"),
     Input("chicken", "value"),
@@ -373,62 +443,60 @@ Callbacks
 )
 def update_bar(chicken_meals, gas_miles, year):
     # Get yearly income and convert to monthly
-    income_value = income_df.loc[income_df["year"] == year, "Income"]
-    if not income_value.empty and income_value.iloc[0] > 0:
-        monthly_income = income_value.iloc[0] / 12
-    else:
-        return make_bar([0, 0], "Monthly Budget Breakdown")  # Return empty chart if no income data
+    income_value = df.loc[df["year"] == year, "income"]
+    if income_value.empty or income_value.iloc[0] <= 0:
+        return make_bar([0, 0, 100], "No Income Data")  # Default to 100% savings
 
-    # Get monthly housing cost
-    house_value = house_df.loc[house_df["year"] == year, "house"]
-    if not house_value.empty:
-        monthly_housing = (((house_value.iloc[0]) * 0.85) / 30) / 12
-    else:
-        monthly_housing = 0
+    monthly_income = income_value.iloc[0] / 12
 
-    # **Define disposable income**
-    disposable_income = monthly_income - monthly_housing
+    # Get monthly housing cost (handle missing data)
+    house_value = df.loc[df["year"] == year, "house"]
+    monthly_housing = (((house_value.iloc[0]) * 0.85) / 30) / 12 if not house_value.empty else 0
+
+    # Calculate disposable income (ensure non-negative)
+    disposable_income = max(0, monthly_income - monthly_housing)
     if disposable_income <= 0:
-        return make_bar([0, 0], "No Disposable Income")  # Prevent division errors
+        return make_bar([0, 0, 100], "No Disposable Income")
 
-    # Calculate gas and food costs
-    gas_cost = gas_miles * cost_per_mile(year)
-    food_cost = chicken_meals * cost_per_meal(year)
+    # Calculate costs (handle missing data)
+    gas_cost = gas_miles * cost_per_mile(year) if not df.loc[df["year"] == year, "gas"].empty else 0
+    food_cost = chicken_meals * cost_per_meal(year) if not df.loc[df["year"] == year, "chicken"].empty else 0
 
-    # Total expenses (excluding housing)
-    total_expense = gas_cost + food_cost
-
-    # Calculate percentages based on disposable income
-    gas_percent = (gas_cost / disposable_income) * 100
-    food_percent = (food_cost / disposable_income) * 100
+    # Calculate percentages (clamped to 0-100)
+    gas_percent = min(100, max(0, (gas_cost / disposable_income) * 100))
+    food_percent = min(100, max(0, (food_cost / disposable_income) * 100))
     savings_percent = max(0, 100 - (gas_percent + food_percent))
 
-    # Values for stacked bar
+    # Ensure total is exactly 100%
+    total = gas_percent + food_percent + savings_percent
+    if total != 100:
+        savings_percent += 100 - total  # Adjust savings to compensate
+
     slider_input = [gas_percent, food_percent, savings_percent]
-    sorted_labels = ["Gas", "Food", "Savings"]
-
     figure = make_bar(slider_input, "Monthly Budget Breakdown")
-    return figure
 
+    # Explicitly set X-axis range (since it's a horizontal bar chart)
+    figure.update_layout(xaxis=dict(range=[0, 100]))
+    return figure
 @app.callback(
     Output("time_series_graph", "figure"),
     Input("year", "value"),
 )
 def update_time_series_graph(year):
-    return make_time_series_graph(df)
+    return make_time_series_graph()  # Use the merged df
 
 @app.callback(
     Output("starting_amount", "children"),
     Input("year", "value")
 )
-
 def update_starting_amount(year):
-    income_value = income_df.loc[income_df["year"] == year, "Income"]
+    income_value = df.loc[df["year"] == year, "income"]
     if not income_value.empty:
         starting_amt = (income_value.iloc[0] / 12)
     else:
         starting_amt = 0  # Default value if the year is missing
     return starting_amt
+
 
 
 if __name__ == "__main__":
